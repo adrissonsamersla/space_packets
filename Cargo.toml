@@ -1,0 +1,12 @@
+[package]
+name = "space_packets"
+version = "0.1.0"
+authors = ["adssam <adrissonsamersla@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+log        = "0.4"  # Logging crate
+env_logger = "0.8"  # Logging adapter crate
+
+anyhow     = "1.0"  # Error types with context
+byteorder  = "1"    # Parsing bytes into values
