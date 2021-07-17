@@ -9,7 +9,7 @@ pub enum PktType {
     Telecommand = 1,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct PrimaryHeader {
     pub version_number: u8,
     pub packet_type: PktType,

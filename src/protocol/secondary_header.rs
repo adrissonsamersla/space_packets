@@ -2,7 +2,7 @@ use std::io::{Cursor, Seek, SeekFrom};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SecondaryHeader {
     pub time_week: u32,
     pub time_ms: u32,

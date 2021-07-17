@@ -1,8 +1,9 @@
-use std::io::{BufReader, Cursor, ErrorKind, Read, Seek, SeekFrom};
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::io::Cursor;
+
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, BufReader, ErrorKind, SeekFrom};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 
 use anyhow::{Context, Error, Result};
-use byteorder::{BigEndian, ReadBytesExt};
 
 use crate::protocol::Packet;
 
@@ -24,12 +25,12 @@ pub struct Reader<R> {
     reader: BufReader<R>,
     header_buf: Vec<u8>,
     data_buf: Vec<u8>,
-    channel: SyncSender<Packet>,
+    channel: Sender<Packet>,
 }
 
-impl<R: Read + Unpin> Reader<R> {
+impl<R: AsyncRead + Unpin> Reader<R> {
     pub fn new(src: R) -> (Reader<R>, Receiver<Packet>) {
-        let (sender, receiver) = mpsc::sync_channel(CHANNEL_SIZE);
+        let (sender, receiver) = broadcast::channel(CHANNEL_SIZE);
         let reader = BufReader::with_capacity(BUFFER_SIZE, src);
 
         (
@@ -43,9 +44,9 @@ impl<R: Read + Unpin> Reader<R> {
         )
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         loop {
-            let should_stop = self.read()?;
+            let should_stop = self.read().await?;
 
             let pkt = self.parse()?;
             self.channel.send(pkt)?;
@@ -57,10 +58,10 @@ impl<R: Read + Unpin> Reader<R> {
         Ok(())
     }
 
-    fn read(&mut self) -> Result<bool, Error> {
+    async fn read(&mut self) -> Result<bool> {
         // Reading he primary header of the packet (fixed size: 48bits = 6 u8)
         self.header_buf.resize(HEADER_SIZE, 0); // still needs to be populated
-        let res = self.reader.read_exact(&mut self.header_buf);
+        let res = self.reader.read_exact(&mut self.header_buf).await;
         match res {
             Ok(_) => Ok(false),
             Err(ref err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(true),
@@ -70,12 +71,13 @@ impl<R: Read + Unpin> Reader<R> {
 
         // Parsing the header to get the Packet Data Length
         // As specified by the protocol: #octets = PKT_DATA_LENGTH + 1
-        let data_len = self.parse_pkt_length() + 1;
+        let data_len = self.parse_pkt_length().await + 1;
 
         // Reading the data field, which includes the secondary header
         self.data_buf.resize(data_len, 0);
         self.reader
             .read_exact(&mut self.data_buf)
+            .await
             .with_context(|| format!("Could not read the body of size `{}`", data_len))?;
 
         Ok(false)
@@ -87,14 +89,16 @@ impl<R: Read + Unpin> Reader<R> {
     }
 
     /// Since the reading was successfull: this method is not expected to panick!
-    fn parse_pkt_length(&self) -> usize {
+    async fn parse_pkt_length(&self) -> usize {
         let mut cursor = Cursor::new(&self.header_buf);
         cursor
             .seek(SeekFrom::Start(4))
+            .await
             .expect("Fixed size vector: should reach this position");
 
         cursor
-            .read_u16::<BigEndian>()
+            .read_u16()
+            .await
             .expect("Reading exactly 16 bits: should parse u16") as usize
     }
 }
@@ -110,12 +114,12 @@ mod test {
     ];
     const WRONG_SOURCE: [u8; 8] = [8, 115, 193, 35, 0, 15, 0, 0];
 
-    #[test]
-    fn get_correct_buffers() -> TestResult {
-        let (mut reader, receiver) = Reader::new(&VALID_SOURCE[..]);
-        reader.run()?;
+    #[tokio::test]
+    async fn get_correct_buffers() -> TestResult {
+        let (mut reader, mut receiver) = Reader::new(&VALID_SOURCE[..]);
+        reader.run().await?;
 
-        let pkt = receiver.recv()?;
+        let pkt = receiver.recv().await?;
         let (header, data) = pkt.into_buffers();
 
         let correct_header: Vec<u8> = vec![8, 115, 193, 35, 0, 15];
@@ -129,10 +133,10 @@ mod test {
         Ok(())
     }
 
-    #[test]
+    #[tokio::test]
     #[should_panic]
-    fn invalid_source() {
+    async fn invalid_source() {
         let (mut reader, _) = Reader::new(&WRONG_SOURCE[..]);
-        reader.read().unwrap();
+        reader.read().await.unwrap();
     }
 }

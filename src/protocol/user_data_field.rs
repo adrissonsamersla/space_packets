@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct UserDataField {
     pub data: Vec<u8>,
 }

@@ -8,7 +8,7 @@ use super::user_data_field::UserDataField;
 
 use super::hasher::{self, INITIAL_VALUE};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Packet {
     pub pri_header: PrimaryHeader,
     pub sec_header: Option<SecondaryHeader>,
